@@ -48,19 +48,15 @@ public:
 		res->IsChecked(resEnabled);
 		enableODTKRA->IsChecked(ODTKRAenabled);
 
-		auto oculus_diag_dir_label = CreateTextBlock(L"Oculus Diagnostics Directory");
-		oculus_diag_dir = CreateTextBox();
-
-		oculus_diag_dir->Text(std::wstring(ODTPath.begin(), ODTPath.end())); // why Mr. wide :(
-
 		auto prediction_label = CreateTextBlock(L"Extra Predictions in milliseconds ");
 		extra_prediction_ms = CreateNumberBox(
 			static_cast<int>(extra_prediction));
 
-
+		
 		layoutRoot->AppendElementPairStack(
 			prediction_label,
 			extra_prediction_ms);
+		
 		/*
 		layoutRoot->AppendElementPairStack(
 			test,
@@ -74,11 +70,6 @@ public:
 		layoutRoot->AppendElementPairStack(
 			res_label,
 			res);
-
-		layoutRoot->AppendElementPairStack(
-			oculus_diag_dir_label,
-			oculus_diag_dir);
-
 
 		// Why are these two seperate things?
 		enableODTKRA->OnChecked =
@@ -104,14 +95,6 @@ public:
 			[&, this](ktvr::Interface::ToggleSwitch* sender)
 		{
 			resEnabled = false;
-			save_settings(); // Save everything
-		};
-
-		oculus_diag_dir->OnEnterKeyDown =
-			[&, this](ktvr::Interface::TextBox* sender)
-		{
-			ODTPath = std::string(sender->Text().begin(), sender->Text().end());
-			ODTPath = std::string(ODTPath) + (ODTPath[ODTPath.length()] == '\\' ? "" : "\\"); // adds \ if user forgot to add it
 			save_settings(); // Save everything
 		};
 
@@ -161,7 +144,6 @@ public:
 				archive(
 					//CEREAL_NVP(m_net_port),
 					CEREAL_NVP(extra_prediction),
-					CEREAL_NVP(ODTPath),
 					CEREAL_NVP(ODTKRAenabled),
 					CEREAL_NVP(resEnabled)
 				);
@@ -192,7 +174,6 @@ public:
 				archive(
 					//CEREAL_NVP(m_net_port),
 					CEREAL_NVP(extra_prediction),
-					CEREAL_NVP(ODTPath),
 					CEREAL_NVP(ODTKRAenabled),
 					CEREAL_NVP(resEnabled)
 				);
@@ -209,7 +190,7 @@ public:
 
 		//Reverse ODT cli commands
 		std::string temp = "echo service set-pixels-per-display-pixel-override 1 | \"" + ODTPath + "OculusDebugToolCLI.exe\"";
-		system(temp.c_str());
+		ShellExecute(NULL, L"cmd.exe", (LPCWSTR)temp.c_str(), NULL, NULL, SW_HIDE);
 
 		LPCWSTR Target_window_Name = L"Oculus Debug Tool";
 		HWND hWindowHandle = FindWindow(NULL, Target_window_Name);
@@ -257,24 +238,22 @@ public:
 	{
 		//Sets "set-pixels-per-display-pixel-override" to 0.01 to decrease performance overhead
 		std::string temp = "echo service set-pixels-per-display-pixel-override 0.01 | \"" + ODTPath + "OculusDebugToolCLI.exe\"";
-		system(temp.c_str());
+		ShellExecute(NULL, L"cmd.exe", (LPCWSTR)temp.c_str(), NULL, NULL, SW_HIDE);
 
 		//Turn off ASW, we do not need it
 		temp = "echo server: asw.Off | \"" + ODTPath + "OculusDebugToolCLI.exe\"";
-		system(temp.c_str());
-
-		//Clear screen
-		system("cls");
+		ShellExecute(NULL, L"cmd.exe", (LPCWSTR)temp.c_str(), NULL, NULL, SW_HIDE);
 	}
 
 	ktvr::Interface::TextBlock* test, * TestOutput;
 	ktvr::Interface::NumberBox* extra_prediction_ms;
-	ktvr::Interface::TextBox* oculus_diag_dir;
 
 	int extra_prediction = 11;
-	std::string ODTPath = "C:\\Program Files\\Oculus\\Support\\oculus-diagnostics\\";
 	bool ODTKRAenabled = false;
 	bool resEnabled = true;
+	
+	//RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Oculus VR, LLC\\Oculus", L"Base", RRF_RT_ANY, NULL, (PVOID)&value, &BufferSize);
+	std::string ODTPath = "Test";
 };
 
 /* Exported for dynamic linking */

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <ppl.h>
 #include <thread>
+#include <winreg.h>
 
 #include "Win32_DirectXAppUtil.h"
 #include <OVR_CAPI_D3D.h>
@@ -209,7 +210,7 @@ void GuardianSystemDemo::start_ovr(HINSTANCE hinst) {
 GuardianSystemDemo* instance;
 
 // ODTKRA
-
+bool is_ODTKRA_started = false;
 
 bool ODTKRAstop = false;
 void DeviceHandler::keepRiftAlive()
@@ -232,12 +233,18 @@ void DeviceHandler::keepRiftAlive()
 		ODT_CLI();
 
 	//Starts Oculus Debug Tool
+	//std::string temp = ODTPath + "OculusDebugTool.exe";
+	//TestOutput->Text(std::wstring(temp.begin(), temp.end()));
+
 	start_ODT(hWindowHandle, Target_window_Name);
 
 	Sleep(1000);
 
-	if (check_ODT() == false)
+	if (check_ODT() == false) {
+		is_ODTKRA_started = false;
 		return;
+	}
+		
 
 	hWindowHandle = FindWindow(NULL, Target_window_Name);
 
@@ -282,11 +289,28 @@ std::wstring DeviceHandler::statusResultWString(HRESULT stat)
 	}
 }
 
+void rm_nonprinting(std::string& str) //https://stackoverflow.com/questions/60934716/how-to-strip-all-non-visible-characters-from-a-string-and-keep-special-characte
+{
+	str.erase(std::remove_if(str.begin(), str.end(),
+		[](unsigned char c) {
+			return !std::isprint(c);
+		}),
+		str.end());
+}
+
 void DeviceHandler::initialize()
 {
 	// Initialize your device here
 
 	trackedJoints.clear();
+
+	char value[512];
+	DWORD BufferSize = 512;
+	RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Oculus VR, LLC\\Oculus", L"Base", RRF_RT_ANY, NULL, (PVOID)&value, &BufferSize);
+	std::string valuetemp(value, BufferSize);
+	rm_nonprinting(valuetemp); // Thanks windows..
+
+	ODTPath = valuetemp + "Support\\oculus-diagnostics\\";
 
 	instance = new (_aligned_malloc(sizeof(GuardianSystemDemo), 16)) GuardianSystemDemo();
 
@@ -306,7 +330,6 @@ void DeviceHandler::initialize()
 	initialized = true;
 }
 
-bool is_ODTKRA_started = false;
 unsigned int frame = 0;
 void DeviceHandler::update()
 {
@@ -315,9 +338,12 @@ void DeviceHandler::update()
 
 	if (isInitialized())
 	{
+		//TestOutput->Text(std::wstring(ODTPath.begin(), ODTPath.end()));
+
 		// For the plugin's sake, we'll update the joint with
 		// the user's head position + 1m in z (front) axis
 		// and the user's head orientation
+		
 		if (ODTKRAenabled && !ODTKRAstop && !is_ODTKRA_started)
 		{
 			ODTKRAThread = std::thread([this] { this->keepRiftAlive(); });
@@ -329,10 +355,11 @@ void DeviceHandler::update()
 			is_ODTKRA_started = false;
 			killODT(0);
 			ODTKRAThread.join();
+			ODTKRAstop = false;
 
 		}
 
-		if (frame%3) // really scuffed, but i am lazy
+		if (true) // really scuffed, but i am lazy
 			instance->Render();
 
 		//TestOutput->Text(std::to_wstring(testint));

@@ -322,11 +322,13 @@ void DeviceHandler::initialize()
 	// If we're ok
 	else
 	{
-		auto pBuf = new TCHAR[dwBufSize];
-		RegGetValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Oculus VR, LLC\\Oculus",
-		            L"Base", RRF_RT_ANY, nullptr, &pBuf, &dwBufSize);
+		std::wstring data;
+		data.resize(dwBufSize / sizeof(wchar_t));
 
-		ODTPath = std::wstring(pBuf) + L"Support\\oculus-diagnostics\\";
+		RegGetValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Oculus VR, LLC\\Oculus",
+		            L"Base", RRF_RT_ANY, nullptr, &data[0], &dwBufSize);
+
+		ODTPath = data + L"Support\\oculus-diagnostics\\";
 	}
 
 	instance = new(_aligned_malloc(sizeof(GuardianSystem), 16)) GuardianSystem(this);

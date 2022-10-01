@@ -15,50 +15,63 @@
 
 DirectX11 DIRECTX;
 
-class GuardianSystemDemo
+class GuardianSystem
 {
 public:
-	void start_ovr(HINSTANCE hinst);
+	GuardianSystem(DeviceHandler* _this) :
+		logInfoMessage(_this->logInfoMessage),
+		logWarningMessage(_this->logWarningMessage),
+		logErrorMessage(_this->logErrorMessage),
+		m_result(_this->m_result)
+	{
+	}
+
+	void start_ovr();
 	void InitRenderTargets(const ovrHmdDesc& hmdDesc);
 
-	void  Render();
+	void Render();
 
 	uint32_t vrObjects;
 	ovrSession mSession = nullptr;
 
 private:
-	//    XMVECTOR mObjPosition[Scene::MAX_MODELS];                               // Objects cached position 
-	//    XMVECTOR mObjVelocity[Scene::MAX_MODELS];                               // Objects velocity
-	//    Scene mDynamicScene;                                                    // Scene graph
+	uint32_t mFrameIndex = 0; // Global frame counter
+	ovrPosef mHmdToEyePose[ovrEye_Count] = {}; // Offset from the center of the HMD to each eye
+	ovrRecti mEyeRenderViewport[ovrEye_Count] = {}; // Eye render target viewport
 
-	//   high_resolution_clock mLastUpdateClock;                                 // Stores last update time
-	//   float mGlobalTimeSec = 0;                                               // Game global time
-
-	uint32_t mFrameIndex = 0;                                               // Global frame counter
-	ovrPosef mHmdToEyePose[ovrEye_Count] = {};                              // Offset from the center of the HMD to each eye
-	ovrRecti mEyeRenderViewport[ovrEye_Count] = {};                         // Eye render target viewport
-
-	ovrLayerEyeFov mEyeRenderLayer = {};                                    // OVR  - Eye render layers description
-	ovrTextureSwapChain mTextureChain[ovrEye_Count] = {};                   // OVR  - Eye render target swap chain
-	ID3D11DepthStencilView* mEyeDepthTarget[ovrEye_Count] = {};             // DX11 - Eye depth view
-	std::vector<ID3D11RenderTargetView*> mEyeRenderTargets[ovrEye_Count];   // DX11 - Eye render view
+	ovrLayerEyeFov mEyeRenderLayer = {}; // OVR  - Eye render layers description
+	ovrTextureSwapChain mTextureChain[ovrEye_Count] = {}; // OVR  - Eye render target swap chain
+	ID3D11DepthStencilView* mEyeDepthTarget[ovrEye_Count] = {}; // DX11 - Eye depth view
+	std::vector<ID3D11RenderTargetView*> mEyeRenderTargets[ovrEye_Count]; // DX11 - Eye render view
 
 	bool mShouldQuit = false;
-	//    bool mSlowMotionMode = false;                                           // Slow motion gets enabled when too close to the boundary
+
+	// From parent for logging
+	std::function<void(std::wstring)>& logInfoMessage;
+	std::function<void(std::wstring)>& logWarningMessage;
+	std::function<void(std::wstring)>& logErrorMessage;
+
+	HRESULT& m_result;
 };
 
-void GuardianSystemDemo::InitRenderTargets(const ovrHmdDesc& hmdDesc)
+void GuardianSystem::InitRenderTargets(const ovrHmdDesc& hmdDesc)
 {
 	// For each eye
-	for (int i = 0; i < ovrEye_Count; ++i) {
+	for (int i = 0; i < ovrEye_Count; ++i)
+	{
 		// Viewport
-		const float kPixelsPerDisplayPixel = 1.0f;
-		ovrSizei idealSize = ovr_GetFovTextureSize(mSession, (ovrEyeType)i, hmdDesc.DefaultEyeFov[i], kPixelsPerDisplayPixel);
-		mEyeRenderViewport[i] = { 0, 0, idealSize.w, idealSize.h };
+		const ovrSizei idealSize = ovr_GetFovTextureSize(
+			mSession, static_cast<ovrEyeType>(i),
+			hmdDesc.DefaultEyeFov[i], 1.0f);
+
+		mEyeRenderViewport[i] = {
+			0, 0, idealSize.w, idealSize.h
+		};
 
 		// Create Swap Chain
 		ovrTextureSwapChainDesc desc = {
-			ovrTexture_2D, OVR_FORMAT_R8G8B8A8_UNORM_SRGB, 1, idealSize.w, idealSize.h, 1, 1,
+			ovrTexture_2D, OVR_FORMAT_R8G8B8A8_UNORM_SRGB, 1,
+			idealSize.w, idealSize.h, 1, 1,
 			ovrFalse, ovrTextureMisc_DX_Typeless, ovrTextureBind_DX_RenderTarget
 		};
 
@@ -66,19 +79,23 @@ void GuardianSystemDemo::InitRenderTargets(const ovrHmdDesc& hmdDesc)
 		mEyeRenderLayer.Header.Type = ovrLayerType_EyeFov;
 		mEyeRenderLayer.Viewport[i] = mEyeRenderViewport[i];
 		mEyeRenderLayer.Fov[i] = hmdDesc.DefaultEyeFov[i];
-		mHmdToEyePose[i] = ovr_GetRenderDesc(mSession, (ovrEyeType)i, hmdDesc.DefaultEyeFov[i]).HmdToEyePose;
+		mHmdToEyePose[i] = ovr_GetRenderDesc(
+			mSession, static_cast<ovrEyeType>(i),
+			hmdDesc.DefaultEyeFov[i]).HmdToEyePose;
 
 		// DirectX 11 - Generate RenderTargetView from textures in swap chain
 		// ----------------------------------------------------------------------
-		ovrResult result = ovr_CreateTextureSwapChainDX(mSession, DIRECTX.Device, &desc, &mTextureChain[i]);
-		if (!OVR_SUCCESS(result)) {
-			printf("ovr_CreateTextureSwapChainDX failed");
-		}
+		ovrResult result = ovr_CreateTextureSwapChainDX(
+			mSession, DIRECTX.Device, &desc, &mTextureChain[i]);
+
+		if (!OVR_SUCCESS(result))
+			logErrorMessage(L"ovr_CreateTextureSwapChainDX failed");
 
 		// Render Target, normally triple-buffered
 		int textureCount = 0;
 		ovr_GetTextureSwapChainLength(mSession, mTextureChain[i], &textureCount);
-		for (int j = 0; j < textureCount; ++j) {
+		for (int j = 0; j < textureCount; ++j)
+		{
 			ID3D11Texture2D* renderTexture = nullptr;
 			ovr_GetTextureSwapChainBufferDX(mSession, mTextureChain[i], j, IID_PPV_ARGS(&renderTexture));
 
@@ -87,7 +104,8 @@ void GuardianSystemDemo::InitRenderTargets(const ovrHmdDesc& hmdDesc)
 			};
 
 			ID3D11RenderTargetView* renderTargetView = nullptr;
-			DIRECTX.Device->CreateRenderTargetView(renderTexture, &renderTargetViewDesc, &renderTargetView);
+			DIRECTX.Device->CreateRenderTargetView(renderTexture,
+			                                       &renderTargetViewDesc, &renderTargetView);
 			mEyeRenderTargets[i].push_back(renderTargetView);
 			renderTexture->Release();
 		}
@@ -106,7 +124,7 @@ void GuardianSystemDemo::InitRenderTargets(const ovrHmdDesc& hmdDesc)
 	}
 }
 
-void GuardianSystemDemo::Render()
+void GuardianSystem::Render()
 {
 	// Get current eye pose for rendering
 	double eyePoseTime = 0;
@@ -114,32 +132,22 @@ void GuardianSystemDemo::Render()
 	ovr_GetEyePoses(mSession, mFrameIndex, ovrTrue, mHmdToEyePose, eyePose, &eyePoseTime);
 
 	// Render each eye
-	for (int i = 0; i < ovrEye_Count; ++i) {
+	for (int i = 0; i < ovrEye_Count; ++i)
+	{
 		int renderTargetIndex = 0;
 		ovr_GetTextureSwapChainCurrentIndex(mSession, mTextureChain[i], &renderTargetIndex);
 		ID3D11RenderTargetView* renderTargetView = mEyeRenderTargets[i][renderTargetIndex];
 		ID3D11DepthStencilView* depthTargetView = mEyeDepthTarget[i];
 
 		// Clear and set render/depth target and viewport
-		DIRECTX.SetAndClearRenderTarget(renderTargetView, depthTargetView, 0.0f, 0.0f, 0.0f, 1.0f);  // THE SCREEN RENDER COLOUR
-		DIRECTX.SetViewport((float)mEyeRenderViewport[i].Pos.x, (float)mEyeRenderViewport[i].Pos.y,
-			(float)mEyeRenderViewport[i].Size.w, (float)mEyeRenderViewport[i].Size.h);
-
-		// Eye
-		XMVECTOR eyeRot = XMVectorSet(eyePose[i].Orientation.x, eyePose[i].Orientation.y,
-			eyePose[i].Orientation.z, eyePose[i].Orientation.w);
-		XMVECTOR eyePos = XMVectorSet(eyePose[i].Position.x, eyePose[i].Position.y, eyePose[i].Position.z, 0);
-		XMVECTOR eyeForward = XMVector3Rotate(XMVectorSet(0, 0, -1, 0), eyeRot);
-
-		// Matrices
-		XMMATRIX viewMat = XMMatrixLookAtRH(eyePos, XMVectorAdd(eyePos, eyeForward),
-			XMVector3Rotate(XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f), eyeRot));
-		ovrMatrix4f proj = ovrMatrix4f_Projection(mEyeRenderLayer.Fov[i], 0.001f, 1000.0f, ovrProjection_None);
-		XMMATRIX projMat = XMMatrixTranspose(XMMATRIX(&proj.M[0][0]));
-		XMMATRIX viewProjMat = XMMatrixMultiply(viewMat, projMat);
+		DIRECTX.SetAndClearRenderTarget(renderTargetView, depthTargetView, 0.0f, 0.0f, 0.0f, 1.0f);
+		// THE SCREEN RENDER COLOUR
+		DIRECTX.SetViewport(static_cast<float>(mEyeRenderViewport[i].Pos.x),
+		                    static_cast<float>(mEyeRenderViewport[i].Pos.y),
+		                    static_cast<float>(mEyeRenderViewport[i].Size.w),
+		                    static_cast<float>(mEyeRenderViewport[i].Size.h));
 
 		// Render and commit to swap chain
-		//mDynamicScene.Render(&viewProjMat, 1.0f, 1.0f, 1.0f, 1.0f, true);
 		ovr_CommitTextureSwapChain(mSession, mTextureChain[i]);
 
 		// Update eye layer
@@ -151,76 +159,72 @@ void GuardianSystemDemo::Render()
 	// Submit frames
 	ovrLayerHeader* layers = &mEyeRenderLayer.Header;
 	ovrResult result = ovr_SubmitFrame(mSession, mFrameIndex++, nullptr, &layers, 1);
-	if (!OVR_SUCCESS(result)) {
-		printf("ovr_SubmitFrame failed");
-	}
+
+	if (!OVR_SUCCESS(result))
+		logErrorMessage(L"ovr_SubmitFrame failed");
 }
 
-void GuardianSystemDemo::start_ovr(HINSTANCE hinst) {
-	hinst = hinst;
-	ovrResult result;
-	result = ovr_Initialize(nullptr);
-	if (!OVR_SUCCESS(result)) {
-		printf("ovr_Initialize failed");
+void GuardianSystem::start_ovr()
+{
+	__try
+	{
+		[&, this]
+		{
+			ovrResult result = ovr_Initialize(nullptr);
+			if (!OVR_SUCCESS(result))
+				logErrorMessage(L"ovr_Initialize failed");
+
+			ovrGraphicsLuid luid;
+			result = ovr_Create(&mSession, &luid);
+			if (!OVR_SUCCESS(result))
+				logErrorMessage(L"ovr_Create failed");
+
+			if (!DIRECTX.InitWindow(nullptr, L"GuardianSystemDemo"))
+				logErrorMessage(L"DIRECTX.InitWindow failed");
+
+			// Use HMD desc to initialize device
+			ovrHmdDesc hmdDesc = ovr_GetHmdDesc(mSession);
+			if (!DIRECTX.InitDevice(hmdDesc.Resolution.w / 2,
+			                        hmdDesc.Resolution.h / 2,
+			                        reinterpret_cast<LUID*>(&luid)))
+				logErrorMessage(L"DIRECTX.InitDevice failed");
+
+			// Use FloorLevel tracking origin
+			ovr_SetTrackingOriginType(mSession, ovrTrackingOrigin_FloorLevel);
+
+			InitRenderTargets(hmdDesc);
+			vrObjects = (ovr_GetConnectedControllerTypes(mSession) >> 8) & 0xf;
+
+			// Main Loop
+			Render();
+		}();
 	}
-
-	ovrGraphicsLuid luid;
-	result = ovr_Create(&mSession, &luid);
-	if (!OVR_SUCCESS(result)) {
-		printf("ovr_Create failed");
-	}
-
-	if (!DIRECTX.InitWindow(0/*hinst*/, L"GuardianSystemDemo")) {
-		printf("DIRECTX.InitWindow failed");
-	}
-
-	// Use HMD desc to initialize device
-	ovrHmdDesc hmdDesc = ovr_GetHmdDesc(mSession);
-	if (!DIRECTX.InitDevice(hmdDesc.Resolution.w / 2, hmdDesc.Resolution.h / 2, reinterpret_cast<LUID*>(&luid))) {
-		printf("DIRECTX.InitDevice failed");
-	}
-
-	// Use FloorLevel tracking origin
-	ovr_SetTrackingOriginType(mSession, ovrTrackingOrigin_FloorLevel);
-
-	InitRenderTargets(hmdDesc);
-	//InitSceneGraph();
-	//mLastUpdateClock = std::chrono::high_resolution_clock::now();
-
-	vrObjects = (ovr_GetConnectedControllerTypes(mSession) >> 8) & 0xf;
-
-	// Main Loop
-	uint64_t counter = 0;
-	Render();
-	uint64_t frame_count = 0;
-	uint8_t buf[128] = { 0 };// , 255, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 0     };
-	unsigned int sizeof_buf = sizeof(buf);
-	ovrHapticsBuffer vibuffer;
-	vibuffer.Samples = buf;
-	vibuffer.SamplesCount = sizeof_buf;
-	vibuffer.SubmitMode = ovrHapticsBufferSubmit_Enqueue;
-
-	for (int i = 0; i < (sizeof_buf/* / 2*/); i++) {
-		buf[i/* *2*/] = 255;
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		[&, this]
+		{
+			logErrorMessage(L"OVR initialization failure!");
+			m_result = E_INIT_FAILURE;
+		}();
 	}
 }
 
 // Funny Variable
-
-GuardianSystemDemo* instance;
+GuardianSystem* instance;
 
 // ODTKRA
 bool is_ODTKRA_started = false;
-
 bool ODTKRAstop = false;
+
 void DeviceHandler::keepRiftAlive()
 {
 	int seconds = 600000;
 
-	LPCWSTR Target_window_Name = L"Oculus Debug Tool";
-	HWND hWindowHandle = FindWindow(NULL, Target_window_Name);
+	auto Target_window_Name = L"Oculus Debug Tool";
+	HWND hWindowHandle = FindWindow(nullptr, Target_window_Name);
 
-	if (hWindowHandle != NULL) {
+	if (hWindowHandle != nullptr)
+	{
 		SendMessage(hWindowHandle, WM_CLOSE, 0, 0);
 		SwitchToThisWindow(hWindowHandle, true);
 	}
@@ -229,7 +233,7 @@ void DeviceHandler::keepRiftAlive()
 
 	//Sends commands to the Oculus Debug Tool CLI to decrease performance overhead
 	//Unlikely to do much, but no reason not to.
-	if(resEnabled)
+	if (resEnabled)
 		ODT_CLI();
 
 	//Starts Oculus Debug Tool
@@ -240,19 +244,22 @@ void DeviceHandler::keepRiftAlive()
 
 	Sleep(1000);
 
-	if (check_ODT() == false) {
+	if (check_ODT() == false)
+	{
 		is_ODTKRA_started = false;
 		return;
 	}
-		
 
-	hWindowHandle = FindWindow(NULL, Target_window_Name);
 
-	HWND PropertGrid = FindWindowEx(hWindowHandle, NULL, L"wxWindowNR", NULL);
-	HWND wxWindow = FindWindowEx(PropertGrid, NULL, L"wxWindow", NULL);
+	hWindowHandle = FindWindow(nullptr, Target_window_Name);
 
-	while (!ODTKRAstop) {
-		if (seconds==600000) {
+	HWND PropertGrid = FindWindowEx(hWindowHandle, nullptr, L"wxWindowNR", nullptr);
+	HWND wxWindow = FindWindowEx(PropertGrid, nullptr, L"wxWindow", nullptr);
+
+	while (!ODTKRAstop)
+	{
+		if (seconds == 600000)
+		{
 			SendMessage(wxWindow, WM_KEYDOWN, VK_UP, 0);
 			SendMessage(wxWindow, WM_KEYUP, VK_UP, 0);
 			Sleep(50);
@@ -268,12 +275,14 @@ void DeviceHandler::keepRiftAlive()
 }
 
 // Regular Amethyst stuff
-
 std::thread ODTKRAThread;
 
 HRESULT DeviceHandler::getStatusResult()
 {
-	return S_OK;
+	// Enable/disable settings
+	Flags_SettingsSupported = m_result == S_OK;
+
+	return m_result;
 }
 
 std::wstring DeviceHandler::statusResultWString(HRESULT stat)
@@ -284,66 +293,74 @@ std::wstring DeviceHandler::statusResultWString(HRESULT stat)
 	switch (stat)
 	{
 	case S_OK: return L"Success!\nS_OK\nEverything's good!";
+	case E_NOT_STARTED: return
+			L"Not started yet!\nE_NOT_STARTED\nClick 'Refresh' to initialize this device!";
+	case E_INIT_FAILURE: return
+			L"Init failure!\nE_INIT_FAILURE\nCheck if your Oculus HMD is connected and dash is started properly!";
 	default: return L"Undefined: " + std::to_wstring(stat) +
 			L"\nE_UNDEFINED\nSomething weird has happened, though we can't tell what.";
 	}
 }
 
-void rm_nonprinting(std::string& str) //https://stackoverflow.com/questions/60934716/how-to-strip-all-non-visible-characters-from-a-string-and-keep-special-characte
-{
-	str.erase(std::remove_if(str.begin(), str.end(),
-		[](unsigned char c) {
-			return !std::isprint(c);
-		}),
-		str.end());
-}
-
 void DeviceHandler::initialize()
 {
-	// Initialize your device here
+	// Find out the size of the buffer required to store the value
+	DWORD dwBufSize = 0;
+	LONG lRetVal = RegGetValue(
+		HKEY_LOCAL_MACHINE,
+		L"SOFTWARE\\WOW6432Node\\Oculus VR, LLC\\Oculus",
+		L"Base",
+		RRF_RT_ANY,
+		nullptr,
+		nullptr,
+		&dwBufSize);
 
-	trackedJoints.clear();
+	if (ERROR_SUCCESS != lRetVal ||
+		dwBufSize <= 0)
+		logErrorMessage(L"ODT could not be found! Some things may refuse to work!");
 
-	char value[512];
-	DWORD BufferSize = 512;
-	RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Oculus VR, LLC\\Oculus", L"Base", RRF_RT_ANY, NULL, (PVOID)&value, &BufferSize);
-	std::string valuetemp(value, BufferSize);
-	rm_nonprinting(valuetemp); // Thanks windows..
-
-	ODTPath = valuetemp + "Support\\oculus-diagnostics\\";
-
-	instance = new (_aligned_malloc(sizeof(GuardianSystemDemo), 16)) GuardianSystemDemo();
-
-	// Setup Oculus Stuff
-	instance->start_ovr(0);
-	
-	trackedJoints.push_back(ktvr::K2TrackedJoint("Left Touch Controller"));
-	trackedJoints.push_back(ktvr::K2TrackedJoint("Right Touch Controller"));
-
-	for (int i = 0; i < instance->vrObjects; i++)
+	// If we're ok
+	else
 	{
-		trackedJoints.push_back(ktvr::K2TrackedJoint("VR Object " + std::to_string(i+1)));
+		auto pBuf = new TCHAR[dwBufSize];
+		RegGetValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Oculus VR, LLC\\Oculus",
+		            L"Base", RRF_RT_ANY, nullptr, &pBuf, &dwBufSize);
+
+		ODTPath = std::wstring(pBuf) + L"Support\\oculus-diagnostics\\";
 	}
 
+	instance = new(_aligned_malloc(sizeof(GuardianSystem), 16)) GuardianSystem(this);
+
+	// Assume success
+	m_result = S_OK;
+
+	// Setup Oculus Stuff
+	instance->start_ovr();
+
+	// Always should keep >0 joints at init so replace the 1st one
+	trackedJoints[0] = ktvr::K2TrackedJoint(L"Left Touch Controller");
+	trackedJoints.push_back(ktvr::K2TrackedJoint(L"Right Touch Controller"));
+
+	for (int i = 0; i < instance->vrObjects; i++)
+		trackedJoints.push_back(ktvr::K2TrackedJoint(L"VR Object " + std::to_wstring(i + 1)));
 
 	// Mark the device as initialized
 	initialized = true;
 }
 
 unsigned int frame = 0;
+
 void DeviceHandler::update()
 {
 	// Update joints' positions here
 	// Note: this is fired up every loop
 
-	if (isInitialized())
-	{
-		//TestOutput->Text(std::wstring(ODTPath.begin(), ODTPath.end()));
+	// Enable/disable settings
+	Flags_SettingsSupported = m_result == S_OK;
 
-		// For the plugin's sake, we'll update the joint with
-		// the user's head position + 1m in z (front) axis
-		// and the user's head orientation
-		
+	// Run the update loop
+	if (isInitialized() && m_result == S_OK)
+	{
 		if (ODTKRAenabled && !ODTKRAstop && !is_ODTKRA_started)
 		{
 			ODTKRAThread = std::thread([this] { this->keepRiftAlive(); });
@@ -356,57 +373,99 @@ void DeviceHandler::update()
 			killODT(0);
 			ODTKRAThread.join();
 			ODTKRAstop = false;
-
 		}
 
-		if (true) // really scuffed, but i am lazy
-			instance->Render();
+		instance->Render();
 
-		//TestOutput->Text(std::to_wstring(testint));
-
-		ovrTrackingState ss = ovr_GetTrackingState(instance->mSession, 0, false);
-
-		ovrTrackingState tracking_state = ovr_GetTrackingState(instance->mSession, (ovr_GetTimeInSeconds() + ((float)extra_prediction * 0.001)), ovrTrue);
+		auto tracking_state = ovr_GetTrackingState(
+			instance->mSession,
+			ovr_GetTimeInSeconds() +
+			static_cast<float>(extra_prediction) * 0.001,
+			ovrTrue);
 
 		for (int i = 0; i < 2; i++)
 		{
 			trackedJoints.at(i).update(
-				Eigen::Vector3f(
+				{
 					tracking_state.HandPoses[i].ThePose.Position.x,
 					tracking_state.HandPoses[i].ThePose.Position.y,
-					tracking_state.HandPoses[i].ThePose.Position.z),
-				Eigen::Quaternion(
+					tracking_state.HandPoses[i].ThePose.Position.z
+				},
+				{
 					tracking_state.HandPoses[i].ThePose.Orientation.w,
 					tracking_state.HandPoses[i].ThePose.Orientation.x,
 					tracking_state.HandPoses[i].ThePose.Orientation.y,
-					tracking_state.HandPoses[i].ThePose.Orientation.z),
+					tracking_state.HandPoses[i].ThePose.Orientation.z
+				},
+				{
+					tracking_state.HandPoses[i].LinearVelocity.x,
+					tracking_state.HandPoses[i].LinearVelocity.y,
+					tracking_state.HandPoses[i].LinearVelocity.z
+				},
+				{
+					tracking_state.HandPoses[i].LinearAcceleration.x,
+					tracking_state.HandPoses[i].LinearAcceleration.y,
+					tracking_state.HandPoses[i].LinearAcceleration.z
+				},
+				{
+					tracking_state.HandPoses[i].AngularVelocity.x,
+					tracking_state.HandPoses[i].AngularVelocity.y,
+					tracking_state.HandPoses[i].AngularVelocity.z
+				},
+				{
+					tracking_state.HandPoses[i].AngularAcceleration.x,
+					tracking_state.HandPoses[i].AngularAcceleration.y,
+					tracking_state.HandPoses[i].AngularAcceleration.z
+				},
 				ktvr::State_Tracked);
-
 		}
 
-		for (int i = 0; i < instance->vrObjects; i++) {
-			ovrTrackedDeviceType deviceType = (ovrTrackedDeviceType)(ovrTrackedDevice_Object0 + i);
+		for (int i = 0; i < instance->vrObjects; i++)
+		{
+			auto deviceType = static_cast<ovrTrackedDeviceType>(ovrTrackedDevice_Object0 + i);
 			ovrPoseStatef ovr_pose;
 
-			ovr_GetDevicePoses(instance->mSession, &deviceType, 1, (ovr_GetTimeInSeconds() + ((float)extra_prediction * 0.001)), &ovr_pose);
-			if ((ovr_pose.ThePose.Orientation.x != 0) && (ovr_pose.ThePose.Orientation.y != 0) && (ovr_pose.ThePose.Orientation.z != 0)) {
-				trackedJoints.at(2+i).update(
-					Eigen::Vector3f(
+			ovr_GetDevicePoses(instance->mSession, &deviceType, 1,
+			                   (ovr_GetTimeInSeconds() + (static_cast<float>(extra_prediction) * 0.001)), &ovr_pose);
+			if ((ovr_pose.ThePose.Orientation.x != 0) && (ovr_pose.ThePose.Orientation.y != 0) && (ovr_pose.ThePose.
+				Orientation.z != 0))
+			{
+				trackedJoints.at(i + 2).update(
+					{
 						ovr_pose.ThePose.Position.x,
 						ovr_pose.ThePose.Position.y,
-						ovr_pose.ThePose.Position.z),
-					Eigen::Quaternion(
+						ovr_pose.ThePose.Position.z
+					},
+					{
 						ovr_pose.ThePose.Orientation.w,
 						ovr_pose.ThePose.Orientation.x,
 						ovr_pose.ThePose.Orientation.y,
-						ovr_pose.ThePose.Orientation.z),
+						ovr_pose.ThePose.Orientation.z
+					},
+					{
+						ovr_pose.LinearVelocity.x,
+						ovr_pose.LinearVelocity.y,
+						ovr_pose.LinearVelocity.z
+					},
+					{
+						ovr_pose.LinearAcceleration.x,
+						ovr_pose.LinearAcceleration.y,
+						ovr_pose.LinearAcceleration.z
+					},
+					{
+						ovr_pose.AngularVelocity.x,
+						ovr_pose.AngularVelocity.y,
+						ovr_pose.AngularVelocity.z
+					},
+					{
+						ovr_pose.AngularAcceleration.x,
+						ovr_pose.AngularAcceleration.y,
+						ovr_pose.AngularAcceleration.z
+					},
 					ktvr::State_Tracked);
 			}
 		}
 
-		
-		
-		
 
 		// Mark that we see the user
 		skeletonTracked = true;
@@ -418,14 +477,25 @@ void DeviceHandler::shutdown()
 {
 	initialized = false;
 
-	if (ODTKRAenabled)
+	__try
 	{
-		ODTKRAstop = true;
-		ODTKRAThread.join();
-	}
+		if (ODTKRAenabled)
+		{
+			ODTKRAstop = true;
+			ODTKRAThread.join();
+		}
 
-	DIRECTX.ReleaseDevice();
-	ovr_Destroy(instance->mSession);
-	ovr_Shutdown();
-	//delete instance; // crashes for some reason??
+		DIRECTX.ReleaseDevice();
+		ovr_Destroy(instance->mSession);
+		ovr_Shutdown();
+		delete[] instance;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		[&, this]
+		{
+			logErrorMessage(L"OVR shutdown failure!");
+			m_result = E_INIT_FAILURE;
+		}();
+	}
 }

@@ -24,14 +24,14 @@
  *
  */
 
-// https://stackoverflow.com/a/59617138
+ // https://stackoverflow.com/a/59617138
 
-// String to Wide String (The better one)
+ // String to Wide String (The better one)
 inline std::wstring StringToWString(const std::string& str)
 {
 	const int count = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), str.length(), nullptr, 0);
 	std::wstring w_str(count, 0);
-	MultiByteToWideChar(CP_UTF8, 0, str.c_str(), str.length(), &w_str[0], count);
+	MultiByteToWideChar(CP_UTF8, 0, str.c_str(), str.length(), w_str.data(), count);
 	return w_str;
 }
 
@@ -40,14 +40,14 @@ inline std::string WStringToString(const std::wstring& w_str)
 {
 	const int count = WideCharToMultiByte(CP_UTF8, 0, w_str.c_str(), w_str.length(), nullptr, 0, nullptr, nullptr);
 	std::string str(count, 0);
-	WideCharToMultiByte(CP_UTF8, 0, w_str.c_str(), -1, &str[0], count, nullptr, nullptr);
+	WideCharToMultiByte(CP_UTF8, 0, w_str.c_str(), -1, str.data(), count, nullptr, nullptr);
 	return str;
 }
 
 namespace ktvr
 {
 	// Interface Version
-	static const char* IAME_API_Devices_Version = "IAME_API_Version_017";
+	static const char* IAME_API_Devices_Version = "IAME_API_Version_020";
 
 	// Return messaging types
 	enum K2InitErrorType
@@ -122,16 +122,21 @@ namespace ktvr
 		}
 
 		K2TrackedBaseJoint(Eigen::Vector3d pos, Eigen::Quaterniond rot,
-		                   const ITrackedJointState& state) :
-			jointPosition{std::move(pos)},
-			jointOrientation{std::move(rot)},
-			trackingState{state}
+			const ITrackedJointState& state) :
+			jointPosition{ std::move(pos) },
+			jointOrientation{ std::move(rot) },
+			trackingState{ state }
 		{
-			positionTimestamp = AME_API_GET_TIMESTAMP_NOW;
+			// Init timestamp creation
+			previousPoseTimestamp = AME_API_GET_TIMESTAMP_NOW;
+			poseTimestamp = AME_API_GET_TIMESTAMP_NOW;
 		}
 
 		[[nodiscard]] Eigen::Vector3d getJointPosition() const { return jointPosition; }
 		[[nodiscard]] Eigen::Quaterniond getJointOrientation() const { return jointOrientation; }
+
+		[[nodiscard]] Eigen::Vector3d getPreviousJointPosition() const { return previousJointPosition; }
+		[[nodiscard]] Eigen::Quaterniond getPreviousJointOrientation() const { return previousJointOrientation; }
 
 		[[nodiscard]] Eigen::Vector3d getJointVelocity() const { return jointVelocity; }
 		[[nodiscard]] Eigen::Vector3d getJointAcceleration() const { return jointAcceleration; }
@@ -140,30 +145,40 @@ namespace ktvr
 		[[nodiscard]] Eigen::Vector3d getJointAngularAcceleration() const { return jointAngularAcceleration; }
 
 		[[nodiscard]] ITrackedJointState getTrackingState() const { return trackingState; } // ITrackedJointState
-		[[nodiscard]] long long getPositionTimestamp() const { return positionTimestamp; }
+
+		[[nodiscard]] long long getPoseTimestamp() const { return poseTimestamp; }
+		[[nodiscard]] long long getPreviousPoseTimestamp() const { return previousPoseTimestamp; }
 
 		// For servers!
 		void update(Eigen::Vector3d position,
-		            Eigen::Quaterniond orientation,
-		            const ITrackedJointState state)
+			Eigen::Quaterniond orientation,
+			const ITrackedJointState state)
 		{
+			previousJointPosition = jointPosition;
+			previousJointOrientation = jointOrientation;
+
 			jointPosition = std::move(position);
 			jointOrientation = std::move(orientation);
+
 			trackingState = state;
 
 			// Update pose timestamp
-			positionTimestamp = AME_API_GET_TIMESTAMP_NOW;
+			previousPoseTimestamp = poseTimestamp;
+			poseTimestamp = AME_API_GET_TIMESTAMP_NOW;
 		}
 
 		// For servers!
 		void update(Eigen::Vector3d position,
-		            Eigen::Quaterniond orientation,
-					Eigen::Vector3d velocity,
-					Eigen::Vector3d acceleration,
-					Eigen::Vector3d angularVelocity,
-					Eigen::Vector3d angularAcceleration,
-		            const ITrackedJointState state)
+			Eigen::Quaterniond orientation,
+			Eigen::Vector3d velocity,
+			Eigen::Vector3d acceleration,
+			Eigen::Vector3d angularVelocity,
+			Eigen::Vector3d angularAcceleration,
+			const ITrackedJointState state)
 		{
+			previousJointPosition = jointPosition;
+			previousJointOrientation = jointOrientation;
+
 			jointPosition = std::move(position);
 			jointOrientation = std::move(orientation);
 
@@ -175,21 +190,25 @@ namespace ktvr
 			trackingState = state;
 
 			// Update pose timestamp
-			positionTimestamp = AME_API_GET_TIMESTAMP_NOW;
+			previousPoseTimestamp = poseTimestamp;
+			poseTimestamp = AME_API_GET_TIMESTAMP_NOW;
 		}
 
 		// For servers!
 		void update_position(Eigen::Vector3d position)
 		{
+			previousJointPosition = jointPosition;
 			jointPosition = std::move(position);
 
 			// Update pose timestamp
-			positionTimestamp = AME_API_GET_TIMESTAMP_NOW;
+			previousPoseTimestamp = poseTimestamp;
+			poseTimestamp = AME_API_GET_TIMESTAMP_NOW;
 		}
 
 		// For servers!
 		void update_orientation(Eigen::Quaterniond orientation)
 		{
+			previousJointOrientation = jointOrientation;
 			jointOrientation = std::move(orientation);
 		}
 
@@ -228,6 +247,9 @@ namespace ktvr
 		Eigen::Vector3d jointPosition = Eigen::Vector3d(0., 0., 0.);
 		Eigen::Quaterniond jointOrientation = Eigen::Quaterniond(1., 0., 0., 0.);
 
+		Eigen::Vector3d previousJointPosition = Eigen::Vector3d(0., 0., 0.);
+		Eigen::Quaterniond previousJointOrientation = Eigen::Quaterniond(1., 0., 0., 0.);
+
 		Eigen::Vector3d jointVelocity = Eigen::Vector3d(0., 0., 0.);
 		Eigen::Vector3d jointAcceleration = Eigen::Vector3d(0., 0., 0.);
 
@@ -235,7 +257,9 @@ namespace ktvr
 		Eigen::Vector3d jointAngularAcceleration = Eigen::Vector3d(0., 0., 0.);
 
 		ITrackedJointState trackingState = State_NotTracked;
-		long long positionTimestamp = 0;
+
+		long long poseTimestamp = 0;
+		long long previousPoseTimestamp = 0;
 	};
 
 	// Tracking Device Joint class for client plugins : Extended
@@ -247,13 +271,13 @@ namespace ktvr
 		{
 		}
 
-		explicit K2TrackedJoint(std::wstring name) : jointName{std::move(name)}
+		explicit K2TrackedJoint(std::wstring name) : jointName{ std::move(name) }
 		{
 		}
 
 		K2TrackedJoint(Eigen::Vector3d pos, Eigen::Quaterniond rot,
-		               const ITrackedJointState& state, std::wstring name) :
-			jointName{std::move(name)}
+			const ITrackedJointState& state, std::wstring name) :
+			jointName{ std::move(name) }
 		{
 			jointPosition = std::move(pos);
 			jointOrientation = std::move(rot);
@@ -745,7 +769,7 @@ namespace ktvr
 			virtual void AppendSingleElement(
 				const Element& element,
 				const SingleLayoutHorizontalAlignment& alignment =
-					SingleLayoutHorizontalAlignment::Left)
+				SingleLayoutHorizontalAlignment::Left)
 			{
 			}
 
@@ -939,31 +963,31 @@ namespace ktvr
 		Interface::LayoutRoot* layoutRoot;
 
 		// Create a text block
-		std::function<Interface::TextBlock*(const std::wstring& text)> CreateTextBlock;
+		std::function<Interface::TextBlock* (const std::wstring& text)> CreateTextBlock;
 
 		// Create a labeled button
-		std::function<Interface::Button*(const std::wstring& content)> CreateButton;
+		std::function<Interface::Button* (const std::wstring& content)> CreateButton;
 
 		// Create a number box
-		std::function<Interface::NumberBox*(const int& value)> CreateNumberBox;
+		std::function<Interface::NumberBox* (const int& value)> CreateNumberBox;
 
 		// Create a combo box
-		std::function<Interface::ComboBox*(const std::vector<std::wstring>& entries)> CreateComboBox;
+		std::function<Interface::ComboBox* (const std::vector<std::wstring>& entries)> CreateComboBox;
 
 		// Create a check box
-		std::function<Interface::CheckBox*()> CreateCheckBox;
+		std::function<Interface::CheckBox* ()> CreateCheckBox;
 
 		// Create a toggle switch
-		std::function<Interface::ToggleSwitch*()> CreateToggleSwitch;
+		std::function<Interface::ToggleSwitch* ()> CreateToggleSwitch;
 
 		// Create a text box
-		std::function<Interface::TextBox*()> CreateTextBox;
+		std::function<Interface::TextBox* ()> CreateTextBox;
 
 		// Create a progress ring
-		std::function<Interface::ProgressRing*()> CreateProgressRing;
+		std::function<Interface::ProgressRing* ()> CreateProgressRing;
 
 		// Create a progress bar
-		std::function<Interface::ProgressBar*()> CreateProgressBar;
+		std::function<Interface::ProgressBar* ()> CreateProgressBar;
 
 	protected:
 		ITrackingDeviceCharacteristics deviceCharacteristics =
@@ -1175,31 +1199,31 @@ namespace ktvr
 		Interface::LayoutRoot* layoutRoot;
 
 		// Create a text block
-		std::function<Interface::TextBlock*(const std::wstring& text)> CreateTextBlock;
+		std::function<Interface::TextBlock* (const std::wstring& text)> CreateTextBlock;
 
 		// Create a labeled button
-		std::function<Interface::Button*(const std::wstring& content)> CreateButton;
+		std::function<Interface::Button* (const std::wstring& content)> CreateButton;
 
 		// Create a number box
-		std::function<Interface::NumberBox*(const int& value)> CreateNumberBox;
+		std::function<Interface::NumberBox* (const int& value)> CreateNumberBox;
 
 		// Create a combo box
-		std::function<Interface::ComboBox*(const std::vector<std::wstring>& entries)> CreateComboBox;
+		std::function<Interface::ComboBox* (const std::vector<std::wstring>& entries)> CreateComboBox;
 
 		// Create a check box
-		std::function<Interface::CheckBox*()> CreateCheckBox;
+		std::function<Interface::CheckBox* ()> CreateCheckBox;
 
 		// Create a toggle switch
-		std::function<Interface::ToggleSwitch*()> CreateToggleSwitch;
+		std::function<Interface::ToggleSwitch* ()> CreateToggleSwitch;
 
 		// Create a text box
-		std::function<Interface::TextBox*()> CreateTextBox;
+		std::function<Interface::TextBox* ()> CreateTextBox;
 
 		// Create a progress ring
-		std::function<Interface::ProgressRing*()> CreateProgressRing;
+		std::function<Interface::ProgressRing* ()> CreateProgressRing;
 
 		// Create a progress bar
-		std::function<Interface::ProgressBar*()> CreateProgressBar;
+		std::function<Interface::ProgressBar* ()> CreateProgressBar;
 
 	protected:
 		// Return device's name (may repeat or overlap)
